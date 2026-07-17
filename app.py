@@ -202,13 +202,13 @@ else:
         # (後略: le_dict の作成や model.fit(X, y) に続く...)
         pitch_locations = df_filtered['PitchLocation'].unique()
             
-            situation = {
+        situation = {
                 'Ball': c_ball, 'Strike': c_strike, 'Out': c_out,
                 'PitcherLR': le_dict['PitcherLR'].transform([p_lr])[0],
                 'Batter': le_dict['Batter'].transform([target_batter])[0]
             }
             
-            candidates = []
+        candidates = []
             for pt in pitch_types:
                 for pl in pitch_locations:
                     row = situation.copy()
@@ -216,10 +216,10 @@ else:
                     row['PitchLocation'] = pl
                     candidates.append(row)
                     
-            X_test = pd.DataFrame(candidates)[features]
-            expected_scores = model.predict(X_test)
+        X_test = pd.DataFrame(candidates)[features]
+        expected_scores = model.predict(X_test)
             
-            results = pd.DataFrame({
+        results = pd.DataFrame({
                 '球種': X_test['PitchType'].apply(lambda x: le_dict['PitchType'].inverse_transform([x])[0]),
                 'コース': X_test['PitchLocation'],
                 'AI推奨度(期待値)': expected_scores
