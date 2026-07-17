@@ -9,7 +9,7 @@ st.title("配球アシスタントAI")
 # 1. データの自動一括読み込みと日付の型変換
 @st.cache_data
 def load_all_data():
-    file_paths = glob.glob('試合データ/*.csv')
+    file_paths = glob.glob('date/*.csv')
     if not file_paths:
         return None
         
