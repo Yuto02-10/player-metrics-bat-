@@ -209,7 +209,7 @@ else:
             }
             
         candidates = []
-            for pt in pitch_types:
+        for pt in pitch_types:
                 for pl in pitch_locations:
                     row = situation.copy()
                     row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
