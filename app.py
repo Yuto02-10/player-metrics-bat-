@@ -18,7 +18,11 @@ def load_all_data():
         # Shift-JISなど文字化けする場合は encoding='shift_jis' を追加してください
         df_each = pd.read_csv(path).dropna(subset=['PitchType', 'PitchLocation'])
         # Date列を日付型に変換 (フォーマットを自動解析)
-        df_each['Date'] = pd.to_datetime(df_each['Date'])
+        # errors='coerce' を追加して、日付に変換できない文字は NaT にする
+        df_each['Date'] = pd.to_datetime(df_each['Date'], errors='coerce')
+        
+        # Date列が NaT (無効な日付) になってしまった行をデータから除外する
+        df_each = df_each.dropna(subset=['Date'])
         df_list.append(df_each)
         
     return pd.concat(df_list, ignore_index=True)
