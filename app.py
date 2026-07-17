@@ -210,11 +210,11 @@ else:
             
         candidates = []
         for pt in pitch_types:
-                for pl in pitch_locations:
-                    row = situation.copy()
-                    row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
-                    row['PitchLocation'] = pl
-                    candidates.append(row)
+            for pl in pitch_locations:
+                row = situation.copy()
+                row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
+                row['PitchLocation'] = pl
+                candidates.append(row)
                     
         X_test = pd.DataFrame(candidates)[features]
         expected_scores = model.predict(X_test)
