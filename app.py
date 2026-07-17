@@ -154,6 +154,52 @@ else:
         
         if st.sidebar.button("AI配球予測を開始"):
             pitch_types = df_filtered['PitchType'].unique()
+            # --- (前略: df_filtered['PitchScore'] = df_filtered.apply(...) までは同じ) ---
+
+        # ------------------------------------
+        # 隣接コースへの重み付け伝播（データ拡張）
+        # ------------------------------------
+        # ストライクゾーン(1〜9)の隣接関係を定義
+        adjacent_map = {
+            1.0: [2.0, 4.0, 5.0],
+            2.0: [1.0, 3.0, 4.0, 5.0, 6.0],
+            3.0: [2.0, 5.0, 6.0],
+            4.0: [1.0, 2.0, 5.0, 7.0, 8.0],
+            5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0],
+            6.0: [2.0, 3.0, 5.0, 8.0, 9.0],
+            7.0: [4.0, 5.0, 8.0],
+            8.0: [4.0, 5.0, 6.0, 7.0, 9.0],
+            9.0: [5.0, 6.0, 8.0]
+        }
+        
+        augmented_rows = []
+        discount_rate = 0.5  # 隣接コースに与える重みの割合（例: 50%減衰）
+
+        for index, row in df_filtered.iterrows():
+            # 1. 実際に投球されたオリジナルデータを追加
+            augmented_rows.append(row)
+            
+            # 2. 投球コースが1〜9の場合、隣接コースの仮想データを生成して追加
+            loc = row['PitchLocation']
+            if loc in adjacent_map:
+                for adj_loc in adjacent_map[loc]:
+                    new_row = row.copy()
+                    new_row['PitchLocation'] = adj_loc
+                    # 期待値（スコア）を減衰させて付与
+                    new_row['PitchScore'] = row['PitchScore'] * discount_rate
+                    augmented_rows.append(new_row)
+                    
+        # 拡張したデータセットをAIの学習用データ(df_train)とする
+        df_train = pd.DataFrame(augmented_rows)
+
+        # ------------------------------------
+        # 特徴量の準備（※読み込み元を df_filtered から df_train に変更）
+        # ------------------------------------
+        features = ['Ball', 'Strike', 'Out', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
+        X = df_train[features].copy()
+        y = df_train['PitchScore']
+        
+        # (後略: le_dict の作成や model.fit(X, y) に続く...)
             pitch_locations = df_filtered['PitchLocation'].unique()
             
             situation = {
