@@ -225,5 +225,5 @@ else:
                 'AI推奨度(期待値)': expected_scores
             }).sort_values(by='AI推奨度(期待値)', ascending=False)
             
-            st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
-            st.dataframe(results.head(5).style.background_gradient(cmap='Blues'))
+        st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
+        st.dataframe(results.head(5).style.background_gradient(cmap='Blues'))
