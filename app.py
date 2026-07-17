@@ -154,7 +154,7 @@ else:
         
         if st.sidebar.button("AI配球予測を開始"):
             pitch_types = df_filtered['PitchType'].unique()
-            # --- (前略: df_filtered['PitchScore'] = df_filtered.apply(...) までは同じ) ---
+     
 
         # ------------------------------------
         # 隣接コースへの重み付け伝播（データ拡張）
@@ -173,7 +173,7 @@ else:
         }
         
         augmented_rows = []
-        discount_rate = 0.5  # 隣接コースに与える重みの割合（例: 50%減衰）
+        discount_rate = 0.7  # 隣接コースに与える重みの割合（例: 50%減衰）
 
         for index, row in df_filtered.iterrows():
             # 1. 実際に投球されたオリジナルデータを追加
@@ -200,7 +200,7 @@ else:
         y = df_train['PitchScore']
         
         # (後略: le_dict の作成や model.fit(X, y) に続く...)
-            pitch_locations = df_filtered['PitchLocation'].unique()
+        pitch_locations = df_filtered['PitchLocation'].unique()
             
             situation = {
                 'Ball': c_ball, 'Strike': c_strike, 'Out': c_out,
