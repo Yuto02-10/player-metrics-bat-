@@ -152,78 +152,38 @@ else:
         c_out = st.sidebar.slider("アウト", 0, 2, 0)
         p_lr = st.sidebar.radio("投手の左右", ["右", "左"])
         
+        # ------------------------------------
+        # 予測UIと実行
+        # ------------------------------------
         if st.sidebar.button("AI配球予測を開始"):
+            # ボタンが押されたら、以下の処理がすべて実行されます（すべて一段階右にインデント）
             pitch_types = df_filtered['PitchType'].unique()
-     
-
-        # ------------------------------------
-        # 隣接コースへの重み付け伝播（データ拡張）
-        # ------------------------------------
-        # ストライクゾーン(1〜9)の隣接関係を定義
-        adjacent_map = {
-            1.0: [2.0, 4.0, 5.0],
-            2.0: [1.0, 3.0, 4.0, 5.0, 6.0],
-            3.0: [2.0, 5.0, 6.0],
-            4.0: [1.0, 2.0, 5.0, 7.0, 8.0],
-            5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0],
-            6.0: [2.0, 3.0, 5.0, 8.0, 9.0],
-            7.0: [4.0, 5.0, 8.0],
-            8.0: [4.0, 5.0, 6.0, 7.0, 9.0],
-            9.0: [5.0, 6.0, 8.0]
-        }
-        
-        augmented_rows = []
-        discount_rate = 0.7  # 隣接コースに与える重みの割合（例: 50%減衰）
-
-        for index, row in df_filtered.iterrows():
-            # 1. 実際に投球されたオリジナルデータを追加
-            augmented_rows.append(row)
+            pitch_locations = df_filtered['PitchLocation'].unique()
             
-            # 2. 投球コースが1〜9の場合、隣接コースの仮想データを生成して追加
-            loc = row['PitchLocation']
-            if loc in adjacent_map:
-                for adj_loc in adjacent_map[loc]:
-                    new_row = row.copy()
-                    new_row['PitchLocation'] = adj_loc
-                    # 期待値（スコア）を減衰させて付与
-                    new_row['PitchScore'] = row['PitchScore'] * discount_rate
-                    augmented_rows.append(new_row)
-                    
-        # 拡張したデータセットをAIの学習用データ(df_train)とする
-        df_train = pd.DataFrame(augmented_rows)
-
-        # ------------------------------------
-        # 特徴量の準備（※読み込み元を df_filtered から df_train に変更）
-        # ------------------------------------
-        features = ['Ball', 'Strike', 'Out', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
-        X = df_train[features].copy()
-        y = df_train['PitchScore']
-        
-        # (後略: le_dict の作成や model.fit(X, y) に続く...)
-        pitch_locations = df_filtered['PitchLocation'].unique()
-            
-        situation = {
+            situation = {
                 'Ball': c_ball, 'Strike': c_strike, 'Out': c_out,
                 'PitcherLR': le_dict['PitcherLR'].transform([p_lr])[0],
                 'Batter': le_dict['Batter'].transform([target_batter])[0]
             }
             
-        candidates = []
-        for pt in pitch_types:
-            for pl in pitch_locations:
-                row = situation.copy()
-                row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
-                row['PitchLocation'] = pl
-                candidates.append(row)
-                    
-        X_test = pd.DataFrame(candidates)[features]
-        expected_scores = model.predict(X_test)
+            candidates = []
             
-        results = pd.DataFrame({
+            # このforループもボタン処理の一部なので、インデントを揃えます
+            for pt in pitch_types:
+                for pl in pitch_locations:
+                    row = situation.copy()
+                    row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
+                    row['PitchLocation'] = pl
+                    candidates.append(row)
+                    
+            X_test = pd.DataFrame(candidates)[features]
+            expected_scores = model.predict(X_test)
+            
+            results = pd.DataFrame({
                 '球種': X_test['PitchType'].apply(lambda x: le_dict['PitchType'].inverse_transform([x])[0]),
                 'コース': X_test['PitchLocation'],
                 'AI推奨度(期待値)': expected_scores
             }).sort_values(by='AI推奨度(期待値)', ascending=False)
             
-        st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
-        st.dataframe(results.head(5).style.background_gradient(cmap='Blues'))
+            st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
+            st.dataframe(results.head(5))
