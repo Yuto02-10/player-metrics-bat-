@@ -194,7 +194,7 @@ else:
         
         if not target_batters:
             st.warning("打者を1人以上選択してください。")
-    　　st.stop()
+            st.stop()
         
         c_ball = st.sidebar.slider("ボール", 0, 3, 0)
         c_strike = st.sidebar.slider("ストライク", 0, 2, 0)
