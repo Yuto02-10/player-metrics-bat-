@@ -24,6 +24,7 @@ def load_all_data():
         # Date列が NaT (無効な日付) になってしまった行をデータから除外する
         df_each = df_each.dropna(subset=['Date'])
         df_list.append(df_each)
+        df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
         
     return pd.concat(df_list, ignore_index=True)
 
