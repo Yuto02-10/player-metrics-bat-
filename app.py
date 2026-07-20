@@ -187,7 +187,15 @@ else:
         # --- 予測UI ---
         st.sidebar.header("🎯 配球シミュレーション設定")
         all_batters = sorted(df_filtered['Batter'].dropna().unique())
+        
         target_batter = st.sidebar.selectbox("対戦打者を選択", all_batters)
+        
+　　　　target_batters = st.sidebar.multiselect("対象打者を選択（複数可）", batter_list)
+
+
+　　　　if not target_batters:
+    　　st.warning("打者を1人以上選択してください。")
+    　　st.stop()
         
         c_ball = st.sidebar.slider("ボール", 0, 3, 0)
         c_strike = st.sidebar.slider("ストライク", 0, 2, 0)
@@ -198,34 +206,41 @@ else:
         # 予測UIと実行
         # ------------------------------------
         if st.sidebar.button("AI配球予測を開始"):
-            # ボタンが押されたら、以下の処理がすべて実行されます（すべて一段階右にインデント）
             pitch_types = df_filtered['PitchType'].unique()
             pitch_locations = df_filtered['PitchLocation'].unique()
             
-            situation = {
-                'Ball': c_ball, 'Strike': c_strike, 'Out': c_out,
-                'PitcherLR': le_dict['PitcherLR'].transform([p_lr])[0],
-                'Batter': le_dict['Batter'].transform([target_batter])[0]
-            }
-            
-            candidates = []
-            
-            # このforループもボタン処理の一部なので、インデントを揃えます
-            for pt in pitch_types:
-                for pl in pitch_locations:
-                    row = situation.copy()
-                    row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
-                    row['PitchLocation'] = pl
-                    candidates.append(row)
-                    
-            X_test = pd.DataFrame(candidates)[features]
-            expected_scores = model.predict(X_test)
-            
-            results = pd.DataFrame({
-                '球種': X_test['PitchType'].apply(lambda x: le_dict['PitchType'].inverse_transform([x])[0]),
-                'コース': X_test['PitchLocation'],
-                'AI推奨度(期待値)': expected_scores
-            }).sort_values(by='AI推奨度(期待値)', ascending=False)
-            
-            st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
-            st.dataframe(results.head(5))
+            # 選ばれた複数の打者それぞれに対して予測を実行するループ
+            for target_batter in target_batters:
+                
+                # ------------------------------------
+                # ここから下は1人の打者に対する予測処理
+                # ------------------------------------
+                situation = {
+                    'Ball': c_ball, 'Strike': c_strike, 'Out': c_out,
+                    'PitcherLR': le_dict['PitcherLR'].transform([p_lr])[0],
+                    'Batter': le_dict['Batter'].transform([target_batter])[0]
+                }
+                
+                candidates = []
+                for pt in pitch_types:
+                    for pl in pitch_locations:
+                        row = situation.copy()
+                        row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
+                        row['PitchLocation'] = pl
+                        candidates.append(row)
+                        
+                X_test = pd.DataFrame(candidates)[features]
+                expected_scores = model.predict(X_test)
+                
+                results = pd.DataFrame({
+                    '球種': X_test['PitchType'].apply(lambda x: le_dict['PitchType'].inverse_transform([x])[0]),
+                    'コース': X_test['PitchLocation'],
+                    'AI推奨度(期待値)': expected_scores
+                }).sort_values(by='AI推奨度(期待値)', ascending=False)
+                
+                # 打者ごとに見出しと表を出力
+                st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
+                st.dataframe(results.head(5))
+                
+                # 複数の表が連続して表示されるため、区切り線を入れると見やすくなります
+                st.markdown("---")
