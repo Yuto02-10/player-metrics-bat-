@@ -209,7 +209,7 @@ else:
         
         c_ball = st.sidebar.slider("ボール", 0, 3, 0)
         c_strike = st.sidebar.slider("ストライク", 0, 2, 0)
-        c_out = st.sidebar.slider("アウト", 0, 2, 0)
+        #c_out = st.sidebar.slider("アウト", 0, 2, 0)
         p_lr = st.sidebar.radio("投手の左右", ["右", "左"])
         
         # ------------------------------------
