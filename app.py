@@ -25,6 +25,17 @@ def load_all_data():
         df_each = df_each.dropna(subset=['Date'])
         df_list.append(df_each)
         df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
+   
+        df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
+
+        # 👇 ここに名前の空白削除処理を追加
+        # \s+ は「すべての空白文字（半角スペース、全角スペース、タブなど）」を意味します
+        if 'Batter' in df_each.columns:
+            df_each['Batter'] = df_each['Batter'].str.replace(r'\s+', '', regex=True)
+            
+        # 投手（Pitcher）の列もある場合は、一緒に対策しておくことをおすすめします
+        if 'Pitcher' in df_each.columns:
+            df_each['Pitcher'] = df_each['Pitcher'].str.replace(r'\s+', '', regex=True)
         
     return pd.concat(df_list, ignore_index=True)
 
