@@ -129,6 +129,47 @@ else:
         df_filtered = df_filtered.copy()
         # 修正: 関数名を assign_weight_advanced に変更
         df_filtered['PitchScore'] = df_filtered.apply(assign_weight_advanced, axis=1)
+        # ------------------------------------
+        # 隣接コースへの重み付け伝播（ターゲットスムージング）
+        # ------------------------------------
+        # コース1〜9の隣接マップ（必要に応じてボールゾーンも追加可能です）
+        adjacent_map = {
+            1.0: [2.0, 4.0, 5.0],
+            2.0: [1.0, 3.0, 4.0, 5.0, 6.0],
+            3.0: [2.0, 5.0, 6.0],
+            4.0: [1.0, 2.0, 5.0, 7.0, 8.0],
+            5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0],
+            6.0: [2.0, 3.0, 5.0, 8.0, 9.0],
+            7.0: [4.0, 5.0, 8.0],
+            8.0: [4.0, 5.0, 6.0, 7.0, 9.0],
+            9.0: [5.0, 6.0, 8.0]
+        }
+
+        # 一律の減衰率を設定（例: 0.5 なら 50% のスコアを伝播）
+        discount_rate = 0.3
+        augmented_rows = []
+
+        for index, row in df_filtered.iterrows():
+            # 1. 実際に投球されたオリジナルデータを追加
+            augmented_rows.append(row)
+            
+            # 2. 投球コースを取得（小数点表記に統一済みの前提）
+            loc = row['PitchLocation']
+            
+            # loc が NaN(欠損値) ではなく、かつ隣接マップに存在する場合のみ処理
+            if pd.notna(loc) and loc in adjacent_map:
+                for adj_loc in adjacent_map[loc]:
+                    new_row = row.copy()
+                    new_row['PitchLocation'] = adj_loc
+                    # 隣接コースには減衰させたスコアを付与
+                    new_row['PitchScore'] = row['PitchScore'] * discount_rate
+                    augmented_rows.append(new_row)
+
+        # 拡張したデータをAIの学習用データ(df_train)としてデータフレーム化
+        df_train = pd.DataFrame(augmented_rows)
+
+        # 以降のAI学習（RandomForestRegressorのfitなど）は df_train を使用する
+        # 例: X = df_train[features], y = df_train['PitchScore']
         
         features = ['Ball', 'Strike', 'Out', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
         X = df_filtered[features].copy()
