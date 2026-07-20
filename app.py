@@ -188,12 +188,11 @@ else:
         st.sidebar.header("🎯 配球シミュレーション設定")
         all_batters = sorted(df_filtered['Batter'].dropna().unique())
         
-        target_batter = st.sidebar.selectbox("対戦打者を選択", all_batters)
         
-　　　　target_batters = st.sidebar.multiselect("対象打者を選択（複数可）", batter_list)
-
-
-　　　　if not target_batters:
+        target_batters = st.sidebar.multiselect("対象打者を選択（複数可）", batter_list)
+        
+        
+　　　　 if not target_batters:
     　　st.warning("打者を1人以上選択してください。")
     　　st.stop()
         
