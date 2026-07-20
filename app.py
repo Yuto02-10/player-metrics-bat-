@@ -23,19 +23,18 @@ def load_all_data():
         
         # Date列が NaT (無効な日付) になってしまった行をデータから除外する
         df_each = df_each.dropna(subset=['Date'])
-        df_list.append(df_each)
-        df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
-   
+        
+        # コースの数値化
         df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
 
-        # 👇 ここに名前の空白削除処理を追加
-        # \s+ は「すべての空白文字（半角スペース、全角スペース、タブなど）」を意味します
+        # 名前の空白削除処理
         if 'Batter' in df_each.columns:
             df_each['Batter'] = df_each['Batter'].str.replace(r'\s+', '', regex=True)
             
-        # 投手（Pitcher）の列もある場合は、一緒に対策しておくことをおすすめします
         if 'Pitcher' in df_each.columns:
             df_each['Pitcher'] = df_each['Pitcher'].str.replace(r'\s+', '', regex=True)
+            
+        df_list.append(df_each)
         
     return pd.concat(df_list, ignore_index=True)
 
@@ -138,12 +137,11 @@ else:
         st.error("選択された期間のデータが少なすぎます。期間を広げてください。")
     else:
         df_filtered = df_filtered.copy()
-        # 修正: 関数名を assign_weight_advanced に変更
         df_filtered['PitchScore'] = df_filtered.apply(assign_weight_advanced, axis=1)
+        
         # ------------------------------------
         # 隣接コースへの重み付け伝播（ターゲットスムージング）
         # ------------------------------------
-        # コース1〜9の隣接マップ（必要に応じてボールゾーンも追加可能です）
         adjacent_map = {
             1.0: [2.0, 4.0, 5.0],
             2.0: [1.0, 3.0, 4.0, 5.0, 6.0],
@@ -156,35 +154,28 @@ else:
             9.0: [5.0, 6.0, 8.0]
         }
 
-        # 一律の減衰率を設定（例: 0.5 なら 50% のスコアを伝播）
         discount_rate = 0.3
         augmented_rows = []
 
         for index, row in df_filtered.iterrows():
-            # 1. 実際に投球されたオリジナルデータを追加
             augmented_rows.append(row)
-            
-            # 2. 投球コースを取得（小数点表記に統一済みの前提）
             loc = row['PitchLocation']
             
-            # loc が NaN(欠損値) ではなく、かつ隣接マップに存在する場合のみ処理
             if pd.notna(loc) and loc in adjacent_map:
                 for adj_loc in adjacent_map[loc]:
                     new_row = row.copy()
                     new_row['PitchLocation'] = adj_loc
-                    # 隣接コースには減衰させたスコアを付与
                     new_row['PitchScore'] = row['PitchScore'] * discount_rate
                     augmented_rows.append(new_row)
 
-        # 拡張したデータをAIの学習用データ(df_train)としてデータフレーム化
         df_train = pd.DataFrame(augmented_rows)
 
-        # 以降のAI学習（RandomForestRegressorのfitなど）は df_train を使用する
-        # 例: X = df_train[features], y = df_train['PitchScore']
+        # 変更点: AI学習用の特徴量リストから 'Out' を削除
+        features = ['Ball', 'Strike', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
         
-        features = ['Ball', 'Strike', 'Out', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
-        X = df_filtered[features].copy()
-        y = df_filtered['PitchScore']
+        # ターゲットスムージングの学習効果を反映させるため、学習元をdf_trainに変更
+        X = df_train[features].copy()
+        y = df_train['PitchScore']
         
         le_dict = {}
         for col in ['PitcherLR', 'Batter', 'PitchType']:
@@ -197,11 +188,9 @@ else:
         
         # --- 予測UI ---
         st.sidebar.header("🎯 配球シミュレーション設定")
-        all_batters = sorted(df_filtered['Batter'].dropna().unique())
         
         batter_list = df_filtered['Batter'].dropna().unique()
         target_batters = st.sidebar.multiselect("対象打者を選択（複数可）", batter_list)
-        
         
         if not target_batters:
             st.warning("打者を1人以上選択してください。")
@@ -209,7 +198,7 @@ else:
         
         c_ball = st.sidebar.slider("ボール", 0, 3, 0)
         c_strike = st.sidebar.slider("ストライク", 0, 2, 0)
-        #c_out = st.sidebar.slider("アウト", 0, 2, 0)
+        # 変更点: アウトの入力スライダー（c_out）を削除
         p_lr = st.sidebar.radio("投手の左右", ["右", "左"])
         
         # ------------------------------------
@@ -219,14 +208,10 @@ else:
             pitch_types = df_filtered['PitchType'].unique()
             pitch_locations = df_filtered['PitchLocation'].unique()
             
-            # 選ばれた複数の打者それぞれに対して予測を実行するループ
             for target_batter in target_batters:
-                
-                # ------------------------------------
-                # ここから下は1人の打者に対する予測処理
-                # ------------------------------------
+                # 変更点: current_situationの設定から 'Out': c_out を削除
                 situation = {
-                    'Ball': c_ball, 'Strike': c_strike, 'Out': c_out,
+                    'Ball': c_ball, 'Strike': c_strike,
                     'PitcherLR': le_dict['PitcherLR'].transform([p_lr])[0],
                     'Batter': le_dict['Batter'].transform([target_batter])[0]
                 }
@@ -248,9 +233,6 @@ else:
                     'AI推奨度(期待値)': expected_scores
                 }).sort_values(by='AI推奨度(期待値)', ascending=False)
                 
-                # 打者ごとに見出しと表を出力
                 st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
                 st.dataframe(results.head(5))
-                
-                # 複数の表が連続して表示されるため、区切り線を入れると見やすくなります
                 st.markdown("---")
