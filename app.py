@@ -193,7 +193,7 @@ else:
         
         
         if not target_batters:
-    　　st.warning("打者を1人以上選択してください。")
+            st.warning("打者を1人以上選択してください。")
     　　st.stop()
         
         c_ball = st.sidebar.slider("ボール", 0, 3, 0)
