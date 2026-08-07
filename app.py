@@ -177,14 +177,15 @@ else:
         X = df_train[features].copy()
         y = df_train['PitchScore']
         
-        le_dict = {}
-        for col in ['PitcherLR', 'Batter', 'PitchType']:
-            le = LabelEncoder()
-            X[col] = le.fit_transform(X[col].astype(str))
-            le_dict[col] = le
+# pandasの機能(get_dummies)を使って、カテゴリ変数をOne-Hot Encodingに変換
+        X_encoded = pd.get_dummies(X, columns=['PitcherLR', 'Batter', 'PitchType'])
+        
+        # 予測時に列の形を合わせるため、学習した列のリストを保存しておく
+        training_columns = X_encoded.columns
             
         model = RandomForestRegressor(random_state=42, n_estimators=100)
-        model.fit(X, y)
+        # 変換後のデータ(X_encoded)で学習
+        model.fit(X_encoded, y)
         
         # --- 予測UI ---
         st.sidebar.header("🎯 配球シミュレーション設定")
@@ -209,30 +210,44 @@ else:
             pitch_locations = df_filtered['PitchLocation'].unique()
             
             for target_batter in target_batters:
-                # 変更点: current_situationの設定から 'Out': c_out を削除
+             # ------------------------------------
+                # ここから下は1人の打者に対する予測処理
+                # ------------------------------------
+                # 変更点：変換(transform)をやめて、直接文字列を入れる
                 situation = {
                     'Ball': c_ball, 'Strike': c_strike,
-                    'PitcherLR': le_dict['PitcherLR'].transform([p_lr])[0],
-                    'Batter': le_dict['Batter'].transform([target_batter])[0]
+                    'PitcherLR': p_lr,
+                    'Batter': target_batter
                 }
                 
                 candidates = []
                 for pt in pitch_types:
                     for pl in pitch_locations:
                         row = situation.copy()
-                        row['PitchType'] = le_dict['PitchType'].transform([pt])[0]
+                        row['PitchType'] = pt  # ここもそのまま文字列
                         row['PitchLocation'] = pl
                         candidates.append(row)
                         
                 X_test = pd.DataFrame(candidates)[features]
-                expected_scores = model.predict(X_test)
                 
+                # ------------------------------------
+                # 予測データにもOne-Hot Encodingを適用
+                # ------------------------------------
+                X_test_encoded = pd.get_dummies(X_test, columns=['PitcherLR', 'Batter', 'PitchType'])
+                
+                # 学習時と列の構成を完全に一致させる（データに存在しない球種などの列は0で埋める）
+                X_test_encoded = X_test_encoded.reindex(columns=training_columns, fill_value=0)
+                
+                expected_scores = model.predict(X_test_encoded)
+                
+                # 変更点：文字列に戻す処理(inverse_transform)が不要になったため、スッキリしました
                 results = pd.DataFrame({
-                    '球種': X_test['PitchType'].apply(lambda x: le_dict['PitchType'].inverse_transform([x])[0]),
+                    '球種': X_test['PitchType'], 
                     'コース': X_test['PitchLocation'],
                     'AI推奨度(期待値)': expected_scores
                 }).sort_values(by='AI推奨度(期待値)', ascending=False)
                 
                 st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
-                st.dataframe(results.head(5))
+                # 番号(インデックス)を非表示にしてスッキリ表示
+                st.dataframe(results.head(5).reset_index(drop=True))
                 st.markdown("---")
