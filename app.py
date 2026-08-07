@@ -133,72 +133,76 @@ else:
     # ------------------------------------
     # AIの学習と予測
     # ------------------------------------
+    # ------------------------------------
+    # AIの学習と予測
+    # ------------------------------------
     if len(df_filtered) < 10:
         st.error("選択された期間のデータが少なすぎます。期間を広げてください。")
     else:
-        df_filtered = df_filtered.copy()
-        df_filtered['PitchScore'] = df_filtered.apply(assign_weight_advanced, axis=1)
+        # ------------------------------------
+        # AIモデルの学習（キャッシュ化）
+        # ------------------------------------
+        # show_spinnerで学習中であることを画面にお知らせします
+        @st.cache_resource(show_spinner="AIモデルを学習中...（初回のみ時間がかかります）")
+        def train_model(df_input):
+            df_work = df_input.copy()
+            df_work['PitchScore'] = df_work.apply(assign_weight_advanced, axis=1)
+            
+            # 隣接コースへの重み付け伝播（13分割対応版）
+            adjacent_map = {
+                1.0: [2.0, 4.0, 5.0, 10.0, 11.0],
+                2.0: [1.0, 3.0, 4.0, 5.0, 6.0, 10.0],
+                3.0: [2.0, 5.0, 6.0, 10.0, 12.0],
+                4.0: [1.0, 2.0, 5.0, 7.0, 8.0, 11.0],
+                5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0],
+                6.0: [2.0, 3.0, 5.0, 8.0, 9.0, 12.0],
+                7.0: [4.0, 5.0, 8.0, 11.0, 13.0],
+                8.0: [4.0, 5.0, 6.0, 7.0, 9.0, 13.0],
+                9.0: [5.0, 6.0, 8.0, 12.0, 13.0],
+                10.0: [1.0, 2.0, 3.0],
+                11.0: [1.0, 4.0, 7.0],
+                12.0: [3.0, 6.0, 9.0],
+                13.0: [7.0, 8.0, 9.0]
+            }
+            discount_rate = 0.3
+            augmented_rows = []
+
+            for index, row in df_work.iterrows():
+                augmented_rows.append(row)
+                loc = row['PitchLocation']
+                
+                if pd.notna(loc) and loc in adjacent_map:
+                    for adj_loc in adjacent_map[loc]:
+                        new_row = row.copy()
+                        new_row['PitchLocation'] = adj_loc
+                        new_row['PitchScore'] = row['PitchScore'] * discount_rate
+                        augmented_rows.append(new_row)
+
+            df_train = pd.DataFrame(augmented_rows)
+            features = ['Ball', 'Strike', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
+            
+            X = df_train[features].copy()
+            y = df_train['PitchScore']
+            
+            # One-Hot Encoding
+            X_encoded = pd.get_dummies(X, columns=['PitcherLR', 'Batter', 'PitchType'])
+            training_columns = X_encoded.columns
+            
+            model = RandomForestRegressor(random_state=42, n_estimators=100)
+            model.fit(X_encoded, y)
+            
+            # 学習済みモデルと、列の構成を返す
+            return model, training_columns
+
+        # --- 関数の実行 ---
+        # データ(df_filtered)が変わらない限り、2回目以降は一瞬で結果が返ってきます
+        model, training_columns = train_model(df_filtered)
         
-        # ------------------------------------
-        # 隣接コースへの重み付け伝播（ターゲットスムージング）
-        # ------------------------------------
-        # ------------------------------------
-        # 隣接コースへの重み付け伝播（ターゲットスムージング）
-        # ------------------------------------
-        # コース1〜9（ストライクゾーン）と10〜13（ボールゾーン）の隣接マップ
-        adjacent_map = {
-            # --- ストライクゾーン (1〜9) ---
-            # 隅のコースは、対応するボールゾーン(10〜13)にも重みを伝播させる
-            1.0: [2.0, 4.0, 5.0, 10.0, 11.0],
-            2.0: [1.0, 3.0, 4.0, 5.0, 6.0, 10.0],
-            3.0: [2.0, 5.0, 6.0, 10.0, 12.0],
-            4.0: [1.0, 2.0, 5.0, 7.0, 8.0, 11.0],
-            5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0], # ど真ん中はボールゾーンと隣接しない
-            6.0: [2.0, 3.0, 5.0, 8.0, 9.0, 12.0],
-            7.0: [4.0, 5.0, 8.0, 11.0, 13.0],
-            8.0: [4.0, 5.0, 6.0, 7.0, 9.0, 13.0],
-            9.0: [5.0, 6.0, 8.0, 12.0, 13.0],
-            
-            # --- ボールゾーン (10〜13) ---
-            # ボール球の評価を、隣接するストライクゾーンの境界（エッジ）へ伝播させる
-            10.0: [1.0, 2.0, 3.0],      # 高めのボール
-            11.0: [1.0, 4.0, 7.0],      # 左側のボール（捕手目線など）
-            12.0: [3.0, 6.0, 9.0],      # 右側のボール
-            13.0: [7.0, 8.0, 9.0]       # 低めのボール
-        }
-
-        discount_rate = 0.3
-        augmented_rows = []
-
-        for index, row in df_filtered.iterrows():
-            augmented_rows.append(row)
-            loc = row['PitchLocation']
-            
-            if pd.notna(loc) and loc in adjacent_map:
-                for adj_loc in adjacent_map[loc]:
-                    new_row = row.copy()
-                    new_row['PitchLocation'] = adj_loc
-                    new_row['PitchScore'] = row['PitchScore'] * discount_rate
-                    augmented_rows.append(new_row)
-
-        df_train = pd.DataFrame(augmented_rows)
-
-        # 変更点: AI学習用の特徴量リストから 'Out' を削除
+        # （予測時に使うため、特徴量リストをここで再定義しておきます）
         features = ['Ball', 'Strike', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
         
-        # ターゲットスムージングの学習効果を反映させるため、学習元をdf_trainに変更
-        X = df_train[features].copy()
-        y = df_train['PitchScore']
-        
-# pandasの機能(get_dummies)を使って、カテゴリ変数をOne-Hot Encodingに変換
-        X_encoded = pd.get_dummies(X, columns=['PitcherLR', 'Batter', 'PitchType'])
-        
-        # 予測時に列の形を合わせるため、学習した列のリストを保存しておく
-        training_columns = X_encoded.columns
-            
-        model = RandomForestRegressor(random_state=42, n_estimators=100)
-        # 変換後のデータ(X_encoded)で学習
-        model.fit(X_encoded, y)
+        # --- 予測UI ---
+        # （この下からは既存の st.sidebar.header("🎯 配球シミュレーション設定") が続きます）
         
         # --- 予測UI ---
         st.sidebar.header("🎯 配球シミュレーション設定")
