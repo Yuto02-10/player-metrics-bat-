@@ -74,15 +74,15 @@ else:
     # ------------------------------------
     def assign_weight_advanced(row):
         # 0. 三振や四死球など、結果が確定するイベントを最優先で評価
-        if row['KorBB'] == '空振り三振': return 1.8
-        if row['KorBB'] == '見逃し三振': return 1.8
+        if row['KorBB'] == '空振り三振': return 2.5
+        if row['KorBB'] == '見逃し三振': return 2.5
         if row['KorBB'] == '四球': return -4.0
-        if row['PitchResult'] == '死球': return -5.0
+        if row['PitchResult'] == '死球': return -3.0
 
         # 1. インプレー（打球が前に飛んだ）以外の処理
-        if row['PitchResult'] == '空振り': return 0.3
-        if row['PitchResult'] == '見逃し': return 0.2
-        if row['PitchResult'] == 'ファウル': return 0.2
+        if row['PitchResult'] == '空振り': return 0.5
+        if row['PitchResult'] == '見逃し': return 0.3
+        if row['PitchResult'] == 'ファウル': return 0.3
         if row['PitchResult'] == 'ボール': return -0.1
 
         # 2. インプレーの場合（打球性質 × 結果 の組み合わせ）
