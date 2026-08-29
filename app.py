@@ -173,25 +173,28 @@ else:
             c_strike = st.slider("ストライク", 0, 2, 0)
             
         p_lr = st.sidebar.radio("投手の左右", ["右", "左"])
-
-        # ------------------------------------
-        # 【追加】リスク管理用のペナルティ設定UI
-        # ------------------------------------
-        st.sidebar.header("⚠️ リスク管理（危険度設定）")
-        risk_penalty = st.sidebar.slider(
-            "高め変化球へのペナルティ", 
-            min_value=0.0, max_value=5.0, value=1.5, step=0.1, 
-            help="高めに浮いた変化球や、ど真ん中の変化球が推奨されるのを防ぐための減点度合いです。"
-        )
         
         if st.sidebar.button("AI配球予測を開始", use_container_width=True):
             pitch_types = df_filtered['PitchType'].dropna().unique()
             pitch_locations = df_filtered['PitchLocation'].dropna().unique()
             
-            # 【追加】ペナルティ判定に使う変数定義
+            # ==========================================
+            # 【追加・修正】ソースコード内でペナルティを設定
+            # ==========================================
+            # 1. ペナルティの対象となる変化球を指定
             breaking_balls = ['スライダー', 'フォーク', 'カーブ', 'チェンジアップ', 'スプリット', 'シンカー', 'カットボール']
-            high_locations = [1.0, 2.0, 3.0, 11.0] # 1,2,3(高めストライク), 11(高めボール)
-            middle_location = 5.0 # ど真ん中
+            
+            # 2. コースごとのペナルティ値（減点値）を指定
+            # 左側の数字がコース番号、右側の数字がマイナスするスコアの大きさ
+            penalty_map = {
+                1.0: 1.0,   # イン高めストライク（右投手vs右打者の場合など）
+                2.0: 1.1,   # ど真ん中高めストライク（最も危険なのでペナルティ大）
+                3.0: 0.8,   # アウト高めストライク
+                5.0: 1.3,   # ど真ん中ストライク
+                4.0: 0.2
+                6.0: 0.15
+                11.0: 0.1,  # 高めのボールゾーン（すっぽ抜け）
+            }
             
             for target_batter in target_batters:
                 situation = {
@@ -225,13 +228,9 @@ else:
                     p_type = row['球種']
                     loc = row['コース']
                     
-                    # 変化球が高めにいった場合は設定したペナルティを引く
-                    if p_type in breaking_balls and loc in high_locations:
-                        score -= risk_penalty
-                    
-                    # 変化球がど真ん中にいった場合も、設定値の半分のペナルティを引く
-                    elif p_type in breaking_balls and loc == middle_location:
-                        score -= (risk_penalty * 0.5)
+                    # 対象の変化球であり、かつpenalty_mapに登録されているコースなら減点
+                    if p_type in breaking_balls and loc in penalty_map:
+                        score -= penalty_map[loc]
                         
                     return score
 
