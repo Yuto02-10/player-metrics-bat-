@@ -2,11 +2,13 @@ import streamlit as st
 import pandas as pd
 import glob
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
 
+st.set_page_config(page_title="配球アシスタントAI", layout="wide")
 st.title("配球アシスタントAI")
 
-# 1. データの自動一括読み込みと日付の型変換
 @st.cache_data
 def load_all_data():
     file_paths = glob.glob('試合データ/*.csv')
@@ -15,19 +17,12 @@ def load_all_data():
         
     df_list = []
     for path in file_paths:
-        # Shift-JISなど文字化けする場合は encoding='shift_jis' を追加してください
         df_each = pd.read_csv(path).dropna(subset=['PitchType', 'PitchLocation'])
-        # Date列を日付型に変換 (フォーマットを自動解析)
-        # errors='coerce' を追加して、日付に変換できない文字は NaT にする
         df_each['Date'] = pd.to_datetime(df_each['Date'], errors='coerce')
-        
-        # Date列が NaT (無効な日付) になってしまった行をデータから除外する
         df_each = df_each.dropna(subset=['Date'])
         
-        # コースの数値化
         df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
 
-        # 名前の空白削除処理
         if 'Batter' in df_each.columns:
             df_each['Batter'] = df_each['Batter'].str.replace(r'\s+', '', regex=True)
             
@@ -41,11 +36,8 @@ def load_all_data():
 df_raw = load_all_data()
 
 if df_raw is None:
-    st.warning("GitHubの data/ フォルダにCSVファイルを追加してください。")
+    st.warning("「試合データ/」フォルダにCSVファイルを追加してください。")
 else:
-    # ------------------------------------
-    # サイドバー：日付期間の絞り込みUI
-    # ------------------------------------
     st.sidebar.header("📅 データの期間絞り込み")
     
     min_date = df_raw['Date'].min().date()
@@ -69,23 +61,17 @@ else:
         
     st.sidebar.write(f"現在の対象球数: {len(df_filtered)} 球")
     
-    # ------------------------------------
-    # 重み付けルールの定義
-    # ------------------------------------
     def assign_weight_advanced(row):
-        # 0. 三振や四死球など、結果が確定するイベントを最優先で評価
         if row['KorBB'] == '空振り三振': return 2.5
         if row['KorBB'] == '見逃し三振': return 2.5
         if row['KorBB'] == '四球': return -4.0
         if row['PitchResult'] == '死球': return -3.0
 
-        # 1. インプレー（打球が前に飛んだ）以外の処理
         if row['PitchResult'] == '空振り': return 1.5
         if row['PitchResult'] == '見逃し': return 1.3
         if row['PitchResult'] == 'ファウル': return 0.7
         if row['PitchResult'] == 'ボール': return -0.4
 
-        # 2. インプレーの場合（打球性質 × 結果 の組み合わせ）
         if row['PitchResult'] == 'インプレー':
             hit_type = str(row['HitType'])
             hit_result = str(row['HitResult'])
@@ -93,83 +79,48 @@ else:
             
             infielders = ['投手', '捕手', '一塁手', '二塁手', '三塁手', '遊撃手']
             
-            # --- アウトの評価ロジック ---
             if hit_result == 'アウト' or hit_result == 'nan':
                 if hit_type == 'フライ':
-                    if catch_position in infielders:
-                        return 2.5  # 内野フライ
-                    else:
-                        return 1.8  # 外野フライ
-                elif hit_type == 'ゴロ':
-                    return 2.0      # ゴロアウト
-                elif hit_type == 'ライナー':
-                    return 1.5      # ライナーアウト
-                else:
-                    return 0.5      # その他のアウト
+                    return 2.5 if catch_position in infielders else 1.8
+                elif hit_type == 'ゴロ': return 2.0
+                elif hit_type == 'ライナー': return 1.5
+                else: return 0.5
             
-            # --- ヒット・エラーなどの評価ロジック（マトリクス） ---
             weight_matrix = {
-                ('ゴロ', '単打'): -2.8,
-                ('ライナー', '単打'): -5.5,
-                ('フライ', '単打'): -4.7,
-                ('ライナー', '二塁打'): -8.0,
-                ('フライ', '二塁打'): -9.5, 
-                ('ゴロ', '二塁打'): -6.3,
-                ('フライ', '三塁打'): -11.0,
-                ('ライナー', '三塁打'): -9.5,
-                ('ゴロ', '三塁打'): -8.0,
-                ('フライ', '本塁打'): -16.0,
-                ('ゴロ', '本塁打'): -4.5,
-                ('ライナー', '本塁打'): -20.0,
-                ('ゴロ', 'エラー'): 2.5,
-                ('フライ', 'エラー'): 1.0,         
-                ('ライナー', 'エラー'): 1.5,             
+                ('ゴロ', '単打'): -2.8, ('ライナー', '単打'): -5.5, ('フライ', '単打'): -4.7,
+                ('ライナー', '二塁打'): -8.0, ('フライ', '二塁打'): -9.5, ('ゴロ', '二塁打'): -6.3,
+                ('フライ', '三塁打'): -11.0, ('ライナー', '三塁打'): -9.5, ('ゴロ', '三塁打'): -8.0,
+                ('フライ', '本塁打'): -16.0, ('ゴロ', '本塁打'): -4.5, ('ライナー', '本塁打'): -20.0,
+                ('ゴロ', 'エラー'): 2.5, ('フライ', 'エラー'): 1.0, ('ライナー', 'エラー'): 1.5,             
             }
-            
             return weight_matrix.get((hit_type, hit_result), 0.0)
 
         return 0.0
 
-    # ------------------------------------
-    # AIの学習と予測
-    # ------------------------------------
-    # ------------------------------------
-    # AIの学習と予測
-    # ------------------------------------
     if len(df_filtered) < 10:
         st.error("選択された期間のデータが少なすぎます。期間を広げてください。")
     else:
-        # ------------------------------------
-        # AIモデルの学習（キャッシュ化）
-        # ------------------------------------
-        # show_spinnerで学習中であることを画面にお知らせします
         @st.cache_resource(show_spinner="AIモデルを学習中...（初回のみ時間がかかります）")
         def train_model(df_input):
             df_work = df_input.copy()
             df_work['PitchScore'] = df_work.apply(assign_weight_advanced, axis=1)
             
-            # 隣接コースへの重み付け伝播（13分割対応版）
             adjacent_map = {
-                1.0: [2.0, 4.0, 5.0, 11.0],
-                2.0: [1.0, 3.0, 5.0, 11.0, 12.0],
-                3.0: [2.0, 5.0, 6.0, 10.0, 12.0],
-                4.0: [1.0, 2.0, 5.0, 7.0, 8.0, 11.0],
-                5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0],
-                6.0: [2.0, 3.0, 5.0, 8.0, 9.0, 12.0],
-                7.0: [4.0, 5.0, 8.0, 11.0, 13.0],
-                8.0: [4.0, 5.0, 6.0, 7.0, 9.0, 13.0],
-                9.0: [5.0, 6.0, 8.0, 12.0, 13.0],
-                11.0: [1.0, 2.0, 3.0],
-                12.0: [1.0, 4.0, 7.0],
-                13.0: [3.0, 6.0, 9.0],
-                14.0: [7.0, 8.0, 9.0]
+                1.0: [2.0, 4.0, 5.0, 11.0], 2.0: [1.0, 3.0, 5.0, 11.0, 12.0],
+                3.0: [2.0, 5.0, 6.0, 10.0, 12.0], 4.0: [1.0, 2.0, 5.0, 7.0, 8.0, 11.0],
+                5.0: [1.0, 2.0, 3.0, 4.0, 6.0, 7.0, 8.0, 9.0], 6.0: [2.0, 3.0, 5.0, 8.0, 9.0, 12.0],
+                7.0: [4.0, 5.0, 8.0, 11.0, 13.0], 8.0: [4.0, 5.0, 6.0, 7.0, 9.0, 13.0],
+                9.0: [5.0, 6.0, 8.0, 12.0, 13.0], 11.0: [1.0, 2.0, 3.0],
+                12.0: [1.0, 4.0, 7.0], 13.0: [3.0, 6.0, 9.0], 14.0: [7.0, 8.0, 9.0]
             }
             discount_rate = 0.3
+            
+            records = df_work.to_dict('records')
             augmented_rows = []
-
-            for index, row in df_work.iterrows():
+            
+            for row in records:
                 augmented_rows.append(row)
-                loc = row['PitchLocation']
+                loc = row.get('PitchLocation')
                 
                 if pd.notna(loc) and loc in adjacent_map:
                     for adj_loc in adjacent_map[loc]:
@@ -184,25 +135,26 @@ else:
             X = df_train[features].copy()
             y = df_train['PitchScore']
             
-            # One-Hot Encoding
-            X_encoded = pd.get_dummies(X, columns=['PitcherLR', 'Batter', 'PitchType'])
-            training_columns = X_encoded.columns
+            categorical_cols = ['PitcherLR', 'Batter', 'PitchType']
             
-            model = RandomForestRegressor(random_state=42, n_estimators=100)
-            model.fit(X_encoded, y)
+            preprocessor = ColumnTransformer(
+                transformers=[
+                    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_cols)
+                ],
+                remainder='passthrough'
+            )
             
-            # 学習済みモデルと、列の構成を返す
-            return model, training_columns
+            model = Pipeline(steps=[
+                ('preprocessor', preprocessor),
+                ('regressor', RandomForestRegressor(random_state=42, n_estimators=100))
+            ])
+            
+            model.fit(X, y)
+            
+            return model 
 
-        # --- 関数の実行 ---
-        # データ(df_filtered)が変わらない限り、2回目以降は一瞬で結果が返ってきます
-        model, training_columns = train_model(df_filtered)
-        
-        # （予測時に使うため、特徴量リストをここで再定義しておきます）
+        model = train_model(df_filtered)
         features = ['Ball', 'Strike', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
-        
-        # --- 予測UI ---
-        # （この下からは既存の st.sidebar.header("🎯 配球シミュレーション設定") が続きます）
         
         # --- 予測UI ---
         st.sidebar.header("🎯 配球シミュレーション設定")
@@ -214,57 +166,79 @@ else:
             st.warning("打者を1人以上選択してください。")
             st.stop()
         
-        c_ball = st.sidebar.slider("ボール", 0, 3, 0)
-        c_strike = st.sidebar.slider("ストライク", 0, 2, 0)
-        # 変更点: アウトの入力スライダー（c_out）を削除
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            c_ball = st.slider("ボール", 0, 3, 0)
+        with col2:
+            c_strike = st.slider("ストライク", 0, 2, 0)
+            
         p_lr = st.sidebar.radio("投手の左右", ["右", "左"])
+
+        # ------------------------------------
+        # 【追加】リスク管理用のペナルティ設定UI
+        # ------------------------------------
+        st.sidebar.header("⚠️ リスク管理（危険度設定）")
+        risk_penalty = st.sidebar.slider(
+            "高め変化球へのペナルティ", 
+            min_value=0.0, max_value=5.0, value=1.5, step=0.1, 
+            help="高めに浮いた変化球や、ど真ん中の変化球が推奨されるのを防ぐための減点度合いです。"
+        )
         
-        # ------------------------------------
-        # 予測UIと実行
-        # ------------------------------------
-        if st.sidebar.button("AI配球予測を開始"):
-            pitch_types = df_filtered['PitchType'].unique()
-            pitch_locations = df_filtered['PitchLocation'].unique()
+        if st.sidebar.button("AI配球予測を開始", use_container_width=True):
+            pitch_types = df_filtered['PitchType'].dropna().unique()
+            pitch_locations = df_filtered['PitchLocation'].dropna().unique()
+            
+            # 【追加】ペナルティ判定に使う変数定義
+            breaking_balls = ['スライダー', 'フォーク', 'カーブ', 'チェンジアップ', 'スプリット', 'シンカー', 'カットボール']
+            high_locations = [1.0, 2.0, 3.0, 11.0] # 1,2,3(高めストライク), 11(高めボール)
+            middle_location = 5.0 # ど真ん中
             
             for target_batter in target_batters:
-             # ------------------------------------
-                # ここから下は1人の打者に対する予測処理
-                # ------------------------------------
-                # 変更点：変換(transform)をやめて、直接文字列を入れる
                 situation = {
                     'Ball': c_ball, 'Strike': c_strike,
-                    'PitcherLR': p_lr,
-                    'Batter': target_batter
+                    'PitcherLR': p_lr, 'Batter': target_batter
                 }
                 
                 candidates = []
                 for pt in pitch_types:
                     for pl in pitch_locations:
                         row = situation.copy()
-                        row['PitchType'] = pt  # ここもそのまま文字列
+                        row['PitchType'] = pt
                         row['PitchLocation'] = pl
                         candidates.append(row)
                         
                 X_test = pd.DataFrame(candidates)[features]
                 
-                # ------------------------------------
-                # 予測データにもOne-Hot Encodingを適用
-                # ------------------------------------
-                X_test_encoded = pd.get_dummies(X_test, columns=['PitcherLR', 'Batter', 'PitchType'])
+                expected_scores = model.predict(X_test)
                 
-                # 学習時と列の構成を完全に一致させる（データに存在しない球種などの列は0で埋める）
-                X_test_encoded = X_test_encoded.reindex(columns=training_columns, fill_value=0)
-                
-                expected_scores = model.predict(X_test_encoded)
-                
-                # 変更点：文字列に戻す処理(inverse_transform)が不要になったため、スッキリしました
                 results = pd.DataFrame({
                     '球種': X_test['PitchType'], 
                     'コース': X_test['PitchLocation'],
                     'AI推奨度(期待値)': expected_scores
-                }).sort_values(by='AI推奨度(期待値)', ascending=False)
+                })
+
+                # ------------------------------------
+                # 【追加】算出された期待値にペナルティを適用する関数
+                # ------------------------------------
+                def apply_risk_penalty(row):
+                    score = row['AI推奨度(期待値)']
+                    p_type = row['球種']
+                    loc = row['コース']
+                    
+                    # 変化球が高めにいった場合は設定したペナルティを引く
+                    if p_type in breaking_balls and loc in high_locations:
+                        score -= risk_penalty
+                    
+                    # 変化球がど真ん中にいった場合も、設定値の半分のペナルティを引く
+                    elif p_type in breaking_balls and loc == middle_location:
+                        score -= (risk_penalty * 0.5)
+                        
+                    return score
+
+                # 関数を適用してスコアを更新し、ソートし直す
+                results['AI推奨度(期待値)'] = results.apply(apply_risk_penalty, axis=1)
+                results = results.sort_values(by='AI推奨度(期待値)', ascending=False)
                 
                 st.subheader(f"🎯 {target_batter} 選手への推奨配球 Top 5")
-                # 番号(インデックス)を非表示にしてスッキリ表示
-                st.dataframe(results.head(5).reset_index(drop=True))
+                st.dataframe(results.head(5).reset_index(drop=True), use_container_width=True)
                 st.markdown("---")
