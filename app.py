@@ -5,10 +5,10 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
-import plotly.express as px  # ヒートマップ描画用ライブラリ
+import plotly.express as px
 
-st.set_page_config(page_title="配球アシスタントAI", layout="wide")
-st.title("配球アシスタントAI（期間比較モード）")
+st.set_page_config(page_title="配球アシスタントAI (ハイブリッド予測)", layout="wide")
+st.title("配球アシスタントAI（直近×長期 ハイブリッドモード）")
 
 @st.cache_data
 def load_all_data():
@@ -21,7 +21,6 @@ def load_all_data():
         df_each = pd.read_csv(path).dropna(subset=['PitchType', 'PitchLocation'])
         df_each['Date'] = pd.to_datetime(df_each['Date'], errors='coerce')
         df_each = df_each.dropna(subset=['Date'])
-        
         df_each['PitchLocation'] = pd.to_numeric(df_each['PitchLocation'], errors='coerce')
 
         if 'Batter' in df_each.columns:
@@ -40,36 +39,45 @@ if df_raw is None:
     st.warning("「試合データ/」フォルダにCSVファイルを追加してください。")
 else:
     # ------------------------------------
-    # サイドバー：期間を2つ設定
+    # サイドバー：期間と重視度の設定
     # ------------------------------------
-    st.sidebar.header("📅 比較する期間の設定")
+    st.sidebar.header("📅 データの期間設定")
     
     min_date = df_raw['Date'].min().date()
     max_date = df_raw['Date'].max().date()
     
-    st.sidebar.subheader("期間 1")
-    date_range_1 = st.sidebar.date_input(
-        "期間1を選択", value=(min_date, max_date),
-        min_value=min_date, max_value=max_date, key="dr1"
+    st.sidebar.subheader("① 直近データ（前回のリーグ戦など）")
+    date_range_recent = st.sidebar.date_input(
+        "直近の期間を選択", value=(min_date, max_date),
+        min_value=min_date, max_value=max_date, key="dr_recent"
     )
     
-    st.sidebar.subheader("期間 2")
-    date_range_2 = st.sidebar.date_input(
-        "期間2を選択", value=(min_date, max_date),
-        min_value=min_date, max_value=max_date, key="dr2"
+    st.sidebar.subheader("② 長期データ（通算・シーズン全体など）")
+    date_range_long = st.sidebar.date_input(
+        "長期の期間を選択", value=(min_date, max_date),
+        min_value=min_date, max_value=max_date, key="dr_long"
     )
     
-    # データの絞り込み関数
     def filter_by_date(df, date_range):
         if len(date_range) == 2:
             return df[(df['Date'].dt.date >= date_range[0]) & (df['Date'].dt.date <= date_range[1])]
         return df
 
-    df_filtered_1 = filter_by_date(df_raw, date_range_1)
-    df_filtered_2 = filter_by_date(df_raw, date_range_2)
+    df_recent = filter_by_date(df_raw, date_range_recent)
+    df_long = filter_by_date(df_raw, date_range_long)
     
-    st.sidebar.write(f"球数 - 期間1: {len(df_filtered_1)}球 / 期間2: {len(df_filtered_2)}球")
+    st.sidebar.write(f"対象球数 - 直近: {len(df_recent)}球 / 長期: {len(df_long)}球")
     
+    st.sidebar.markdown("---")
+    st.sidebar.header("⚖️ 直近データの重視度")
+    weight_percent = st.sidebar.slider(
+        "直近の調子をどの程度重視しますか？", 
+        min_value=0, max_value=100, value=30, step=5,
+        help="例: 30%にすると、「直近の予測30% ＋ 長期の予測70%」で最終推奨度を計算します。"
+    )
+    weight_recent = weight_percent / 100.0
+    weight_long = 1.0 - weight_recent
+
     def assign_weight_advanced(row):
         if row['KorBB'] == '空振り三振': return 2.5
         if row['KorBB'] == '見逃し三振': return 2.5
@@ -101,13 +109,12 @@ else:
                 ('ゴロ', 'エラー'): 2.5, ('フライ', 'エラー'): 1.0, ('ライナー', 'エラー'): 1.5,             
             }
             return weight_matrix.get((hit_type, hit_result), 0.0)
-
         return 0.0
 
     @st.cache_resource(show_spinner="AIモデルを学習中...（初回のみ時間がかかります）")
     def train_model(df_input):
         if len(df_input) < 10:
-            return None # データが少なすぎる場合は学習しない
+            return None 
             
         df_work = df_input.copy()
         df_work['PitchScore'] = df_work.apply(assign_weight_advanced, axis=1)
@@ -154,21 +161,17 @@ else:
         model.fit(X, y)
         return model 
 
-    # 期間1、期間2のモデルをそれぞれ学習
-    model_1 = train_model(df_filtered_1)
-    model_2 = train_model(df_filtered_2)
+    model_recent = train_model(df_recent)
+    model_long = train_model(df_long)
     
     features = ['Ball', 'Strike', 'PitcherLR', 'Batter', 'PitchType', 'PitchLocation']
-    
-    # 左右でヒートマップの形を揃えるために、データ全体から球種・コースのマスターリストを作成
     global_pitch_types = df_raw['PitchType'].dropna().unique()
     global_pitch_locations = sorted(df_raw['PitchLocation'].dropna().unique())
     
-    # --- 予測UI ---
+    st.sidebar.markdown("---")
     st.sidebar.header("🎯 配球シミュレーション設定")
     
-    # 選択可能な打者を期間1・期間2のデータから統合
-    batter_list = pd.concat([df_filtered_1['Batter'], df_filtered_2['Batter']]).dropna().unique()
+    batter_list = df_raw['Batter'].dropna().unique()
     target_batters = st.sidebar.multiselect("対象打者を選択（複数可）", batter_list)
     
     if not target_batters:
@@ -183,18 +186,15 @@ else:
         
     p_lr = st.sidebar.radio("投手の左右", ["右", "左"])
     
-    if st.sidebar.button("AI配球予測を開始", use_container_width=True):
+    if st.sidebar.button("AIハイブリッド配球予測を開始", use_container_width=True):
         
-        # ペナルティ設定
         breaking_balls = ['スライダー', 'フォーク', 'カーブ', 'チェンジアップ', 'スプリット', 'シンカー', 'カットボール']
         penalty_map = {1.0: 2.0, 2.0: 3.5, 3.0: 2.0, 5.0: 1.5, 11.0: 1.0}
         
-        # 各期間ごとに予測と描画を行う関数
-        def predict_and_display(model, period_name):
-            if model is None:
-                st.error(f"{period_name} のデータ量が不足しているため予測できません。")
-                return
-
+        for target_batter in target_batters:
+            st.subheader(f"🎯 {target_batter} 選手へのハイブリッド推奨配球")
+            st.write(f"算出比率: 直近データ {weight_percent}% ＋ 長期データ {100 - weight_percent}%")
+            
             situation = {
                 'Ball': c_ball, 'Strike': c_strike,
                 'PitcherLR': p_lr, 'Batter': target_batter
@@ -209,50 +209,57 @@ else:
                     candidates.append(row)
                     
             X_test = pd.DataFrame(candidates)[features]
-            expected_scores = model.predict(X_test)
+            
+            # 直近と長期のモデルそれぞれで予測を出す
+            pred_recent = model_recent.predict(X_test) if model_recent is not None else 0
+            pred_long = model_long.predict(X_test) if model_long is not None else 0
+            
+            # データの不足によるフォールバック処理
+            if model_recent is None:
+                final_scores = pred_long
+                st.warning("直近データが少なすぎるため、長期データ100%で算出しました。")
+            elif model_long is None:
+                final_scores = pred_recent
+                st.warning("長期データが少なすぎるため、直近データ100%で算出しました。")
+            else:
+                # 指定された重視度（ウェイト）で期待値をブレンド
+                final_scores = (pred_recent * weight_recent) + (pred_long * weight_long)
             
             results = pd.DataFrame({
                 '球種': X_test['PitchType'], 
                 'コース': X_test['PitchLocation'],
-                'AI推奨度': expected_scores
+                '直近スコア': pred_recent if model_recent is not None else 0,
+                '長期スコア': pred_long if model_long is not None else 0,
+                '総合推奨度': final_scores
             })
 
+            # ペナルティ処理（統合後のスコアから減点する）
             def apply_risk_penalty(row):
-                score = row['AI推奨度']
+                score = row['総合推奨度']
                 if row['球種'] in breaking_balls and row['コース'] in penalty_map:
                     score -= penalty_map[row['コース']]
                 return score
 
-            results['AI推奨度'] = results.apply(apply_risk_penalty, axis=1)
-            results_sorted = results.sort_values(by='AI推奨度', ascending=False)
+            results['総合推奨度'] = results.apply(apply_risk_penalty, axis=1)
+            results_sorted = results.sort_values(by='総合推奨度', ascending=False)
             
-            # --- 結果の表示 ---
-            st.markdown(f"#### 📅 {period_name} のAI推奨")
-            st.dataframe(results_sorted.head(5).reset_index(drop=True), use_container_width=True)
+            # Top5の表示（直近と長期の内訳も表示して根拠をわかりやすく）
+            st.dataframe(
+                results_sorted[['球種', 'コース', '総合推奨度', '直近スコア', '長期スコア']].head(5).reset_index(drop=True),
+                use_container_width=True
+            )
             
-            st.markdown("##### 📊 球種×コース ヒートマップ")
-            pivot_recommend = results.pivot(index='球種', columns='コース', values='AI推奨度')
+            # ヒートマップ描画
+            st.markdown("##### 📊 球種×コース 総合推奨度ヒートマップ")
+            pivot_recommend = results.pivot(index='球種', columns='コース', values='総合推奨度')
             
             fig = px.imshow(
                 pivot_recommend,
                 labels=dict(x="コース番号", y="球種", color="推奨度"),
-                color_continuous_scale="RdBu_r", # 赤が高推奨、青が低推奨
+                color_continuous_scale="RdBu_r",
                 aspect="auto"
             )
             fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(fig, use_container_width=True)
             
-        # 打者ごとにUIを構築
-        for target_batter in target_batters:
-            st.subheader(f"🎯 {target_batter} 選手への推奨配球 期間比較")
-            
-            # 画面を左右に分割
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                predict_and_display(model_1, "期間 1")
-                
-            with col2:
-                predict_and_display(model_2, "期間 2")
-                
             st.markdown("---")
