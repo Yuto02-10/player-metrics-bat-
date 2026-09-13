@@ -248,6 +248,16 @@ else:
                 results_sorted[['球種', 'コース', '総合推奨度', '直近スコア', '長期スコア']].head(5).reset_index(drop=True),
                 use_container_width=True
             )
+            st.markdown("##### ⚾ 球種別の最もおすすめのコース")
+            # 球種ごとに「総合推奨度」が最大となるインデックスを取得
+            idx_best_by_pitch = results.groupby('球種')['総合推奨度'].idxmax()
+            # 該当する行を抽出し、推奨度が高い順に並び替え
+            best_by_pitch_df = results.loc[idx_best_by_pitch].sort_values(by='総合推奨度', ascending=False).reset_index(drop=True)
+            
+            st.dataframe(
+                best_by_pitch_df[['球種', 'コース', '総合推奨度', '直近スコア', '長期スコア']],
+                use_container_width=True
+            )
             
             # ヒートマップ描画
             st.markdown("##### 📊 球種×コース 総合推奨度ヒートマップ")
